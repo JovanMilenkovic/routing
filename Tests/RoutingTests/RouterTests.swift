@@ -119,6 +119,24 @@ class RouterTests: XCTestCase {
         _ = router.route(path: ["users", "42"], parameters: &params)
         print(params)
     }
+    
+    func testDisallow() {
+        let router = TrieRouter(String.self)
+        var params = Parameters()
+        
+        router.disallow(route: Route(path: ["hello", "world"], output: "disallowed"))
+        
+        XCTAssertFalse(router.allows(path: ["hello", "world"], parameters: &params))
+    }
+    
+    func testDisallowIgnoresParam() {
+        let router = TrieRouter(String.self)
+        var params = Parameters()
+        
+        router.disallow(route: Route(path: [.constant("hello"), .parameter("param")], output: "disallowed"))
+        
+        XCTAssertTrue(router.allows(path: ["hello"], parameters: &params))
+    }
 
     static let allTests = [
         ("testRouter", testRouter),
@@ -126,6 +144,7 @@ class RouterTests: XCTestCase {
         ("testCaseSensitiveRouting", testCaseSensitiveRouting),
         ("testAnyRouting", testAnyRouting),
         ("testRouterSuffixes", testRouterSuffixes),
+        ("testDisallow", testDisallow),
     ]
 }
 

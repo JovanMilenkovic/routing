@@ -9,20 +9,22 @@ public final class TrieRouter<Output> {
     ///
     /// Register new routes by using the `register(...)` method.
     public private(set) var routes: [Route<Output>]
-
+    public private(set) var disallowedRoutes: [Route<Output>]
     /// Configured options such as case-sensitivity.
     public var options: Set<RouterOption>
 
     /// The root node.
     private var root: RouterNode<Output>
-
+    private var disallowedRoot: RouterNode<Output>
     /// Create a new `TrieRouter`.
     ///
     /// - parameters:
     ///     - options: Configured options such as case-sensitivity.
     public init(_ type: Output.Type = Output.self, options: Set<RouterOption> = []) {
         self.root = RouterNode<Output>(value: Data([.forwardSlash]))
+        self.disallowedRoot = RouterNode<Output>(value: Data([.forwardSlash]))
         self.routes = []
+        self.disallowedRoutes = []
         self.options = options
     }
 
@@ -39,23 +41,25 @@ public final class TrieRouter<Output> {
         routes.append(route)
 
         // start at the root of the trie branch
-        var current = root
-
-        // for each dynamic path in the route get the appropriate
-        // child generating a new one if necessary
-        for component in route.path {
-            current = current.buildOrFetchChild(for: component)
-        }
-
-        // after iterating over all path components, we can set the output
-        // on the current node
-        debugOnly {
-            if current.output != nil {
-                print("[Routing] Warning: Overriding route output at: \(route.path.readable)")
-            }
-        }
-        current.output = route.output
+        register(route: route, to: root)
     }
+    
+    /// Disallows a new `Route` to this router.
+    ///
+    ///     let route = Route<Int>(path: [.constant("users"), User.parameter], output: ...)
+    ///     let router = TrieRouter<Int>()
+    ///     router.register(route: route)
+    ///
+    /// - parameters:
+    ///     - route: `Route` to disallow to this router.
+    public func disallow(route: Route<Output>) {
+        // store the route so that we can access its metadata later if needed
+        disallowedRoutes.append(route)
+        
+        // start at the disallowed root of the trie branch
+        register(route: route, to: disallowedRoot)
+    }
+    
 
     /// Routes a `path`, returning the best-matching output and collecting any dynamic parameters.
     ///
@@ -68,8 +72,35 @@ public final class TrieRouter<Output> {
     /// - returns: Best-matching output for the supplied path.
     public func route<C>(path: [C], parameters: inout Parameters) -> Output? where C: RoutableComponent {
         // always start at the root node
+        return search(path: path, in: root, parameters: &parameters)
+    }
+    
+    public func allows<C>(path: [C], parameters: inout Parameters) -> Bool where C: RoutableComponent {
+        return search(path: path, in: disallowedRoot, parameters: &parameters) == nil
+    }
+    
+    private func register(route: Route<Output>, to root: RouterNode<Output>) {
+        var current = root
+        
+        // for each dynamic path in the route get the appropriate
+        // child generating a new one if necessary
+        for component in route.path {
+            current = current.buildOrFetchChild(for: component)
+        }
+        
+        // after iterating over all path components, we can set the output
+        // on the current node
+        debugOnly {
+            if current.output != nil {
+                print("[Routing] Warning: Overriding route output at: \(route.path.readable)")
+            }
+        }
+        current.output = route.output
+    }
+    
+    private func search<C>(path: [C], in root: RouterNode<Output>, parameters: inout Parameters) -> Output? where C: RoutableComponent {
         var currentNode: RouterNode = root
-
+        
         // traverse the string path supplied
         search: for path in path {
             // check the constants first
@@ -79,7 +110,7 @@ public final class TrieRouter<Output> {
                     continue search
                 }
             }
-
+            
             // no constants matched, check for dynamic members
             if let parameter = currentNode.parameter {
                 // if no constant routes were found that match the path, but
@@ -92,23 +123,23 @@ public final class TrieRouter<Output> {
                 currentNode = parameter
                 continue search
             }
-
+            
             // check for anythings
             if let anything = currentNode.anything {
                 currentNode = anything
                 continue search
             }
-
+            
             // no constants or dynamic members, check for catchall
             if let catchall = currentNode.catchall {
                 // there is a catchall and it is final, short-circuit to its output
                 return catchall.output
             }
-
+            
             // no matches, stop searching
             return nil
         }
-
+        
         // return the currently resolved responder if there hasn't been an early exit.
         return currentNode.output
     }
